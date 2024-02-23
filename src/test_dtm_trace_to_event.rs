@@ -8,7 +8,7 @@ mod tests {
     use crate::raft_message::{RAFT, RAFT_FUZZY};
     use crate::test_event_handler::tests::EventMessageHandler;
     use crate::test_path::tests::test_data_path;
-    use crate::test_raft_dtm::tests::{InputType, test_raft_gut};
+    use crate::test_dtm::tests::{InputType, test_raft_gut};
 
     #[test]
     fn test_trace_output_event() {

@@ -5,7 +5,7 @@ mod tests {
     use crate::raft_message::RAFT_ABSTRACT;
     use crate::test_config::tests::TEST_CASE_MAX;
     use crate::test_path::tests::test_data_path;
-    use crate::test_raft_dtm::tests::{InputType, test_raft_gut};
+    use crate::test_dtm::tests::{InputType, test_raft_gut};
 
     #[test]
     fn test_raft_abstract_input_from_db() {

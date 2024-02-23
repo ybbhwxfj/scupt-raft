@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::raft_message::RAFT;
-    use crate::test_raft_dtm::tests::{InputType, test_raft_gut};
+    use crate::test_dtm::tests::{InputType, test_raft_gut};
 
     #[test]
     fn test_raft_1node() {

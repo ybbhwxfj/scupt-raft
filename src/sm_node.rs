@@ -39,9 +39,11 @@ impl<T: MsgTrait + 'static> SMNode<T> {
         conf: RaftConf,
         store: Arc<dyn SMStore<T>>,
         notify: Notifier,
+        enable_testing: bool,
     ) -> Res<Self> {
         let opt = IOServiceOpt {
             num_message_receiver: 1,
+            testing: enable_testing,
         };
         let service = IOService::<RMsg<T>>::new(
             conf.node_id,

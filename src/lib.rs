@@ -13,7 +13,7 @@ mod msg_dtm_testing;
 mod msg_raft_state;
 mod test_replicate;
 mod test_path;
-mod test_raft_dtm;
+mod test_dtm;
 
 mod test_raft_abstract;
 mod test_raft_vote;
@@ -22,7 +22,7 @@ mod test_action_read;
 mod test_action_input;
 mod test_message;
 mod test_raft_node;
-mod test_raft_fuzzy;
+mod test_fuzzy_inner;
 mod check_invariants;
 
 mod msg_fuzzy_testing;
@@ -36,4 +36,7 @@ mod test_injection;
 mod test_raft_1node;
 mod test_raft_all;
 mod test_raft_dtm_json;
+mod test_raft_fuzzy;
+mod test_raft_fuzzy_with_init_state;
+mod test_raft_dtm_random;
 

@@ -83,7 +83,7 @@ pub(crate) mod tests {
                 conf.clone(),
                 enable_check_invariants
             )?);
-            let node = SMNode::<M>::new(conf, store, notifier)?;
+            let node = SMNode::<M>::new(conf, store, notifier, true)?;
             let ls = LocalSet::new();
             let r = Builder::new_current_thread()
                 .enable_all()

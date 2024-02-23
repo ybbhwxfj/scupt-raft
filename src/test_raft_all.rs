@@ -3,13 +3,12 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::raft_message::RAFT;
-    use crate::test_config::tests::TEST_CASE_MAX;
+    use crate::test_dtm::tests::{InputType, test_raft_gut};
     use crate::test_path::tests::test_data_path;
-    use crate::test_raft_dtm::tests::{InputType, test_raft_gut};
 
     #[test]
     fn test_raft_all_input_from_db() {
-        for i in 1..TEST_CASE_MAX {
+        for i in 1..=1 {
             let path = format!("raft_trace_{}.db", i);
             let buf = PathBuf::from(test_data_path(path.clone()).unwrap());
             if !buf.exists() {

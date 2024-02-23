@@ -1,4 +1,4 @@
-FROM scupt-raft-prerequisite:latest
+FROM scupt-prerequisite:latest
 
 ENV PATH /root/.cargo/bin/:$PATH
 
@@ -10,9 +10,10 @@ COPY . .
 ENV RUSTFLAGS="-Cinstrument-coverage"
 ENV LLVM_PROFILE_FILE="scupt-raft-%p-%m.profraw"
 
+COPY data/config.toml /root/.cargo/
 COPY Cargo.toml ./
 COPY src ./src
-COPY tests ./test
+COPY tests ./tests
 COPY data ./data
 COPY script ./script
 
@@ -23,6 +24,7 @@ RUN date
 
 RUN grcov . -s . --binary-path ./target/debug/ \
     -t html --branch --ignore-not-existing -o ./target/debug/coverage/
+RUN rm -rf /var/www/coverage
 RUN cp -r ./target/debug/coverage /var/www/
 
 RUN echo "\

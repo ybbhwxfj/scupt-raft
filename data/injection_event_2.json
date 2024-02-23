@@ -1,0 +1,47 @@
+[
+  {
+    "source": 1,
+    "dest": 2,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 2,
+    "dest": 2,
+    "payload": "AppendLogAll"
+  },
+  {
+    "source": 3,
+    "dest": 2,
+    "payload": "VoteReq"
+  },
+  {
+    "source": 2,
+    "dest": 1,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 1,
+    "dest": 1,
+    "payload": "AppendLogAll"
+  },
+  {
+    "source": 3,
+    "dest": 1,
+    "payload": "VoteReq"
+  },
+  {
+    "source": 1,
+    "dest": 3,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 3,
+    "dest": 3,
+    "payload": "AppendLogAll"
+  },
+  {
+    "source": 2,
+    "dest": 3,
+    "payload": "VoteReq"
+  }
+]

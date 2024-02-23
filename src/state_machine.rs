@@ -2,13 +2,11 @@ use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use scupt_fuzzy::{event_add, fuzzy_enable, fuzzy_message
-};
 
+use scupt_fuzzy::{event_add, fuzzy_init, fuzzy_message};
 use scupt_net::message_receiver::ReceiverRR;
 use scupt_net::message_sender::{Sender, SenderResp, SenderRR};
 use scupt_net::notifier::Notifier;
-
 use scupt_util::message::{Message, MsgTrait};
 use scupt_util::mt_set::MTSet;
 use scupt_util::node_id::NID;
@@ -20,11 +18,11 @@ use sedeve_kit::{auto_enable,
                  setup_begin, setup_end};
 use sedeve_kit::player::automata;
 use tokio::select;
-
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
+
 use crate::channel::{
     ChReceiver,
     ChSender,
@@ -36,11 +34,11 @@ use crate::msg_raft_state::MRaftState;
 use crate::raft_config::{RaftConf, RaftConfigEx};
 use crate::raft_event::RaftEvent;
 use crate::raft_message::{
-    MApplyReq, MApplyResp, LogEntry, MAppendReq,
-    MAppendResp, MVoteReq, MVoteResp, PreVoteReq, PreVoteResp,
-    RAFT_ABSTRACT,
-    RaftMessage, MClientReq, MClientResp,
-    RCR_OK, RCR_ERR_RESP, RAFT_FUZZY, RAFT};
+    LogEntry, MAppendReq, MAppendResp, MApplyReq,
+    MApplyResp, MClientReq, MClientResp, MVoteReq, MVoteResp,
+    PreVoteReq,
+    PreVoteResp, RAFT, RAFT_ABSTRACT,
+    RAFT_FUZZY, RaftMessage, RCR_ERR_RESP, RCR_OK};
 use crate::raft_state::RaftState;
 use crate::sm_store::{SMStore, WriteEntriesOpt, WriteSnapshotOpt};
 use crate::snapshot::{Snapshot, SnapshotIndexTerm};
@@ -48,11 +46,6 @@ use crate::snapshot::{Snapshot, SnapshotIndexTerm};
 pub struct StateMachine<T: MsgTrait + 'static> {
     inner: Arc<Mutex<StateMachineInner<T>>>,
 }
-
-
-
-
-
 
 struct StateMachineInner<T: MsgTrait + 'static> {
     state: RaftState,
@@ -72,7 +65,6 @@ struct StateMachineInner<T: MsgTrait + 'static> {
     store: Arc<dyn SMStore<T>>,
     sender: Arc<dyn Sender<RaftMessage<T>>>,
     receiver: Arc<dyn ReceiverRR<RaftMessage<T>>>,
-    client_req:HashMap<String, (NID, Arc<dyn SenderResp<RaftMessage<T>>>)>,
     tick: u64,
     _sender_rr: Arc<dyn SenderRR<RaftMessage<T>>>,
     _notifier:Notifier,
@@ -146,7 +138,6 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
             sender,
             _sender_rr: sender_rr,
             receiver,
-            client_req: Default::default(),
             tick:  0,
             _notifier: Default::default(),
 
@@ -158,56 +149,56 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
     async fn handle_incoming(&mut self) -> Res<()> {
         debug!("state machine node:{} serve loop", self.node_id());
         let ms_tick = self.config.conf().ms_tick;
-        if ms_tick > 0 {
-            loop {
-                select! {
-                    r = self.receiver.receive() => {
-                        let (m, s) = r?;
-                        self.handle_message(m, s).await?;
-                    },
-                    _ = sleep(Duration::from_millis(ms_tick)) => {
-                        self.tick().await?;
-                    },
-                }
-            }
-        } else {
+        if ms_tick > 0 { //NDTM
+            loop { //NDTM
+                select! { //NDTM
+                    r = self.receiver.receive() => { //NDTM
+                        let (m, s) = r?; //NDTM
+                        self.handle_message(m, s).await?; //NDTM
+                    }, //NDTM
+                    _ = sleep(Duration::from_millis(ms_tick)) => { //NDTM
+                        self.tick().await?; //NDTM
+                    }, //NDTM
+                } //NDTM
+            } //NDTM
+        } else { //NDTM
             // only available when in deterministic testing
-            loop {
-                let r = self.receiver.receive().await;
-                let (m, s) = r?;
-                self.handle_message(m, s).await?;
-            }
-        }
-    }
+            loop { //DTM
+                let r = self.receiver.receive().await; //DTM
+                let (m, s) = r?; //DTM
+                self.handle_message(m, s).await?; //DTM
+            } //NDTM
+        } //NDTM
+    } //NDTM
 
 
 
-    async fn tick(&mut self) -> Res<()> {
-        if self.state == RaftState::Leader {
-            self.tick_leader().await?;
-        } else {
-            self.tick_non_leader().await?;
-        }
-        if self.snapshot.index < self.commit_index {
-            let index = min(self.snapshot.index + self.config.conf().max_compact_entries, self.commit_index);
-            self.compact_log(index).await?;
-        }
-        Ok(())
-    }
+    async fn tick(&mut self) -> Res<()> { //NDTM
+        if self.state == RaftState::Leader { //NDTM
+            self.tick_leader().await?; //NDTM
+        } else { //NDTM
+            self.tick_non_leader().await?; //NDTM
+        } //NDTM
+        if self.snapshot.index < self.commit_index { //NDTM
+            let index = min(self.snapshot.index + self.config.conf().max_compact_entries, self.commit_index); //NDTM
+            self.compact_log(index).await?; //NDTM
+        } //NDTM
+        Ok(()) //NDTM
+    } //NDTM
 
-    async fn tick_leader(&mut self)  -> Res<()> {
-        assert_eq!(self.state, RaftState::Leader);
-        self.append_entries().await?;
-        Ok(())
-    }
+    async fn tick_leader(&mut self)  -> Res<()> { //NDTM
+        assert_eq!(self.state, RaftState::Leader); //NDTM
+        self.append_entries().await?; //NDTM
+        Ok(()) //NDTM
+    } //NDTM
 
-    async fn tick_non_leader(&mut self) -> Res<()> {
-        if self.tick > self.config.conf().timeout_max_tick {
-            self.pre_vote_request().await?;
-        }
-        self.tick += 1;
-        Ok(())
-    }
+    async fn tick_non_leader(&mut self) -> Res<()> { //NDTM
+        if self.tick > self.config.conf().timeout_max_tick { //NDTM
+            self.pre_vote_request().await?; //NDTM
+        } //NDTM
+        self.tick += 1; //NDTM
+        Ok(()) //NDTM
+    } //NDTM
 
     async fn handle_raft_message(
         &mut self,
@@ -216,14 +207,13 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         msg: RaftMessage<T>,
         s:Arc<dyn SenderResp<RaftMessage<T>>>
     ) -> Res<()> {
-
-        if self.testing_is_crash  {
+        if self.testing_is_crash  { //FUZZY
             // disable input
-            if let RaftMessage::FuzzyTesting(MFuzzyTesting::Restart) = msg {
-               self.testing_is_crash = false;
-            } else {
-                return Ok(())
-            }
+            if let RaftMessage::FuzzyTesting(MFuzzyTesting::Restart) = msg { //FUZZY
+               self.testing_is_crash = false; //FUZZY
+            } else { //FUZZY
+                return Ok(()) //FUZZY
+            } //FUZZY
         }
 
         assert_eq!(self.node_id(), dest);
@@ -249,36 +239,34 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
                 input!(RAFT, _a);
                 self.handle_append_resp(m).await?;
             }
-            RaftMessage::PreVoteReq(_m) => {
-                event_add!(RAFT_FUZZY, Message::new(RaftEvent::PreVoteReq, source, dest));
-                self.handle_pre_vote_request(_m).await?;
+            RaftMessage::PreVoteReq(_m) => { //NDTM
+                event_add!(RAFT_FUZZY, Message::new(RaftEvent::PreVoteReq, source, dest)); //FUZZY
+                self.handle_pre_vote_request(_m).await?; //NDTM
             }
             RaftMessage::PreVoteResp(_m) => {
-                event_add!(RAFT_FUZZY, Message::new(RaftEvent::PreVoteResp, source, dest));
-                self.handle_pre_vote_response(_m).await?;
+                event_add!(RAFT_FUZZY, Message::new(RaftEvent::PreVoteResp, source, dest)); //FUZZY
+                self.handle_pre_vote_response(_m).await?; //NDTM
             }
             RaftMessage::ApplyReq(_m) => {
-                event_add!(RAFT_FUZZY, Message::new(RaftEvent::ApplyReq, source, dest));
-                input!(RAFT, _a);
+                event_add!(RAFT_FUZZY, Message::new(RaftEvent::ApplyReq, source, dest)); //FUZZY
+                input!(RAFT, _a); //DTM
                 self.handle_apply_snapshot_request(source, dest, _m).await?;
             }
-            RaftMessage::ApplyResp(_m) => {
-                event_add!(RAFT_FUZZY, Message::new(RaftEvent::ApplyResp, source, dest));
-                input!(RAFT, _a);
-                self.handle_apply_snapshot_response(source, dest, _m).await?;
-            }
-            RaftMessage::ClientReq(m) => {
-                self.handle_client_value_req(source, m, s).await?;
-            }
-            RaftMessage::ClientResp(m) => {
-                self.handle_client_response(source, m).await?;
-            }
+            RaftMessage::ApplyResp(_m) => { //NDTM
+                event_add!(RAFT_FUZZY, Message::new(RaftEvent::ApplyResp, source, dest)); //FUZZY
+                input!(RAFT, _a); //DTM
+                self.handle_apply_snapshot_response(source, dest, _m).await?; //NDTM
+            } //NDTM
+            RaftMessage::ClientReq(m) => { //NDTM
+                self.handle_client_value_req(source, m, s).await?; //NDTM
+            } //NDTM
             RaftMessage::DTMTesting(_m) => {
-                self.handle_dtm_testing_message(source, dest, _m).await?;
+                self.handle_dtm_testing_message(source, dest, _m).await?; //DTM
             }
-            RaftMessage::FuzzyTesting(m) => {
-                self.handle_fuzzy_testing(source, dest, m).await?;
+            RaftMessage::FuzzyTesting(m) => { //FUZZY
+                self.handle_fuzzy_testing(source, dest, m).await?; //FUZZY
             }
+            _ => {}
         }
         Ok(())
     }
@@ -295,141 +283,137 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
          self.match_index.clone(),
          self.state.clone(),
          _m);
-        /*
-        if !self._incoming_messages.contains_key(&self.current_term) {
-            self._incoming_messages.insert(self.current_term, vec![s]);
-        } else {
-            self._incoming_messages.get_mut(&self.current_term).unwrap().push(s);
-        }
-         */
+
         Ok(())
     }
 
-    async fn handle_fuzzy_testing(&mut self, _source:NID, _dest:NID, m:MFuzzyTesting) -> Res<()> {
-        match m {
-            MFuzzyTesting::Restart => {
-                self.restart_for_testing().await?;
-            }
-            MFuzzyTesting::Crash => {
-                event_add!(RAFT_FUZZY, Message::new(RaftEvent::Crash, self.node_id(), self.node_id()));
-                self.testing_is_crash = true;
-            }
+    async fn handle_fuzzy_testing(&mut self, _source:NID, _dest:NID, m:MFuzzyTesting<T>) -> Res<()> { //FUZZY
+        match m { //FUZZY
+            MFuzzyTesting::Restart => { //FUZZY
+                self.restart_for_testing().await?; //FUZZY
+            }  //FUZZY
+            MFuzzyTesting::Crash => { //FUZZY
+                event_add!(RAFT_FUZZY, Message::new(RaftEvent::Crash, self.node_id(), self.node_id())); //FUZZY
+                self.testing_is_crash = true; //FUZZY
+            } //FUZZY
+            _ => {} //FUZZY
         }
-        Ok(())
+        Ok(()) //FUZZY
     }
-    async fn pre_vote_request(&mut self) -> Res<()> {
-        self.tick = 0;
-        self.state = RaftState::Follower;
-        self.vote_granted.clear();
-        self.pre_vote_response.clear();
-        if self.config.voter().len() > 1 {
-            self.send_pre_vote_request().await?;
-        } else {
-            self.start_request_vote().await?;
-        }
-        Ok(())
-    }
-
-    async fn send_pre_vote_request(&self) -> Res<()> {
-        let last_index = self.last_log_index();
-        let last_term = self.last_log_term();
-        let term = self.current_term;
-        let from = self.node_id();
-        for id in self.config.voter() {
-            if from != *id {
-                let m = Message::new(
-                    RaftMessage::PreVoteReq(
-                        PreVoteReq {
-                            source_nid: from,
-                            request_term: term,
-                            last_log_term: last_term,
-                            last_log_index: last_index,
-                        }
-                    ),
-                    self.node_id(),
-                    *id,
-                );
-                self.send(m).await?;
-            }
-        }
-        Ok(())
+    async fn pre_vote_request(&mut self) -> Res<()> { //NDTM
+        self.tick = 0; //NDTM
+        self.state = RaftState::Follower; //NDTM
+        self.vote_granted.clear(); //NDTM
+        self.pre_vote_response.clear(); //NDTM
+        if self.config.voter().len() > 1 { //NDTM
+            self.send_pre_vote_request().await?; //NDTM
+        } else { //NDTM
+            self.start_request_vote().await?; //NDTM
+        } //NDTM
+        Ok(()) //NDTM
     }
 
-    async fn handle_pre_vote_request(
-        &mut self,
-        m: PreVoteReq,
-    ) -> Res<()> {
-        let grant = self.can_grant_vote(m.request_term + 1,
-                                        m.last_log_index,
-                                        m.last_log_term,
-                                        m.source_nid);
-
-        let resp = Message::new(
-            RaftMessage::PreVoteResp(
-                PreVoteResp {
-                    source_nid: self.node_id(),
-                    request_term: m.request_term,
-                    vote_granted: grant
-                }
-            ),
-            self.node_id(),
-            m.source_nid,
-        );
-        self.send(resp).await?;
-        Ok(())
+    async fn send_pre_vote_request(&self) -> Res<()> { //NDTM
+        let last_index = self.last_log_index();  //NDTM
+        let last_term = self.last_log_term(); //NDTM
+        let term = self.current_term; //NDTM
+        let from = self.node_id(); //NDTM
+        for id in self.config.voter() { //NDTM
+            if from != *id { //NDTM
+                let m = Message::new( //NDTM
+                    RaftMessage::PreVoteReq( //NDTM
+                        PreVoteReq { //NDTM
+                            source_nid: from, //NDTM
+                            request_term: term, //NDTM
+                            last_log_term: last_term, //NDTM
+                            last_log_index: last_index, //NDTM
+                        } //NDTM
+                    ), //NDTM
+                    self.node_id(), //NDTM
+                    *id, //NDTM
+                ); //NDTM
+                self.send(m).await?; //NDTM
+            } //NDTM
+        } //NDTM
+        Ok(()) //NDTM
     }
 
-    async fn handle_pre_vote_response(
-        &mut self,
-        m: PreVoteResp,
-    ) -> Res<()> {
-        if self.current_term == m.request_term && self.state == RaftState::Follower {
-            let _ = self.pre_vote_response.insert(m.source_nid, m);
-            let opt_can_request_vote = self.try_become_candidate();
-            if let Some(can_request_vote) = opt_can_request_vote {
-                self.pre_vote_response.clear();
-                if can_request_vote {
-                    self.start_request_vote().await?;
-                }
-            }
-        }
-        Ok(())
+    async fn handle_pre_vote_request(   //NDTM
+        &mut self,  //NDTM
+        m: PreVoteReq, //NDTM
+    ) -> Res<()> { //NDTM
+        let grant = self.can_grant_vote(m.request_term + 1, //NDTM
+                                        m.last_log_index, //NDTM
+                                        m.last_log_term, //NDTM
+                                        m.source_nid); //NDTM
+
+        let resp = Message::new( //NDTM
+            RaftMessage::PreVoteResp( //NDTM
+                PreVoteResp { //NDTM
+                    source_nid: self.node_id(), //NDTM
+                    request_term: m.request_term, //NDTM
+                    vote_granted: grant //NDTM
+                } //NDTM
+            ), //NDTM
+            self.node_id(), //NDTM
+            m.source_nid, //NDTM
+        ); //NDTM
+        self.send(resp).await?; //NDTM
+        Ok(()) //NDTM
     }
 
-    fn try_become_candidate(& self) -> Option<bool> {
-        if self.pre_vote_response.len() * 2 > self.config.voter().len() {
-            let mut yes = 0;
-            let mut no = 0;
-            for (_, m) in self.pre_vote_response.iter() {
-                if m.vote_granted {
-                    yes += 1
-                } else {
-                    no += 1
-                }
-            }
-            if (1 + yes) * 2 > self.config.voter().len() {
-                return Some(true);
-            }
-            if no * 2 > self.config.voter().len() {
-                return Some(false);
-            }
-        }
-        None
+    async fn handle_pre_vote_response( //NDTM
+        &mut self, //NDTM
+        m: PreVoteResp, //NDTM
+    ) -> Res<()> { //NDTM
+        if self.current_term == m.request_term && self.state == RaftState::Follower { //NDTM
+            let _ = self.pre_vote_response.insert(m.source_nid, m); //NDTM
+            let opt_can_request_vote = self.try_become_candidate(); //NDTM
+            if let Some(can_request_vote) = opt_can_request_vote { //NDTM
+                self.pre_vote_response.clear(); //NDTM
+                if can_request_vote { //NDTM
+                    self.start_request_vote().await?; //NDTM
+                } //NDTM
+            } //NDTM
+        } //NDTM
+        Ok(()) //NDTM
     }
 
+    fn try_become_candidate(& self) -> Option<bool> { //NDTM
+        if self.pre_vote_response.len() * 2 > self.config.voter().len() { //NDTM
+            let mut yes = 0; //NDTM
+            let mut no = 0; //NDTM
+            for (_, m) in self.pre_vote_response.iter() { //NDTM
+                if m.vote_granted { //NDTM
+                    yes += 1 //NDTM
+                } else { //NDTM
+                    no += 1 //NDTM
+                } //NDTM
+            } //NDTM
+            if (1 + yes) * 2 > self.config.voter().len() { //NDTM
+                return Some(true); //NDTM
+            } //NDTM
+            if no * 2 > self.config.voter().len() { //NDTM
+                return Some(false); //NDTM
+            } //NDTM
+        } //NDTM
+        None //NDTM
+    }
+
+    // vote_begin
     async fn try_become_leader(&mut self) -> Res<()> {
         if self.state == RaftState::Candidate &&
             self.vote_granted.len() * 2 > self.config.voter().len() {
             let granted_nodes = self.vote_granted.len();
             if granted_nodes * 2 > self.config.voter().len() {
-                self.become_leader().await?;
+                self.become_leader().await;
             }
         }
         Ok(())
     }
 
-    async fn become_leader(&mut self) -> Res<()> {
-        event_add!(RAFT_FUZZY, Message::new(RaftEvent::BecomeLeader, self.node_id(), self.node_id()));
+    async fn become_leader(&mut self) {
+        event_add!(RAFT_FUZZY, Message::new(RaftEvent::BecomeLeader, self.node_id(), self.node_id())); //FUZZY
         self.next_index.clear();
         self.match_index.clear();
         self.tick = 0;
@@ -442,8 +426,6 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
                 self.match_index.insert(*i, self.snapshot.index);
             }
         }
-
-        Ok(())
     }
 
     fn last_log_term(&self) -> u64 {
@@ -483,7 +465,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         if self.config.voter().len() > 1 {
             self.send_vote_request().await?;
         } else {
-            self.become_leader().await?;
+            self.become_leader().await;
         }
         Ok(())
     }
@@ -573,9 +555,9 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         &mut self,
         m: MVoteResp,
     ) -> Res<()> {
-        let _a = Message::new(
-            RaftMessage::DTMTesting(MDTMTesting::<T>::HandleVoteResp(m.clone())),
-            self.node_id(), self.node_id());
+        let _a = Message::new( //DTM
+            RaftMessage::DTMTesting(MDTMTesting::<T>::HandleVoteResp(m.clone())), //DTM
+            self.node_id(), self.node_id()); //DTM
 
         if m.term == self.current_term && (
             self.state == RaftState::Candidate ||
@@ -589,48 +571,6 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         Ok(())
     }
 
-    async fn restart_for_testing(
-        &mut self,
-    ) -> Res<()> {
-        event_add!(RAFT_FUZZY, Message::new(RaftEvent::Restart, self.node_id(), self.node_id()));
-        self.testing_is_crash = false;
-        self.state = RaftState::Follower;
-        self.tick = 0;
-        self.match_index.clear();
-        self.next_index.clear();
-        self.vote_granted.clear();
-
-        self.pre_vote_response.clear();
-        self.recovery().await?;
-        self.commit_index = self.snapshot.index;
-        Ok(())
-    }
-
-    async fn compact_log(&mut self, index: u64) -> Res<()> {
-        if index <= self.snapshot.index {
-            return Ok(());
-        }
-        event_add!(RAFT_FUZZY, Message::new(RaftEvent::CompactLog, self.node_id(), self.node_id()));
-        let n = (index - self.snapshot.index) as usize;
-        assert!(n >= 1);
-        if cfg!(debug_assertions) {
-            let entry = self.store.read_log_entries(0, i64::MAX as u64).await?;
-            assert_eq!(entry, self.log);
-        }
-        let log_entries: Vec<_> = self.log.splice(0..=n - 1, vec![]).collect();
-        if !log_entries.is_empty() {
-            let entry: &LogEntry<T> = log_entries.last().unwrap();
-            self.snapshot.index = entry.index;
-            self.snapshot.term = entry.term;
-
-            self.store.compact_log(self.snapshot.clone(), log_entries).await?;
-            if cfg!(debug_assertions) {
-                let entry = self.store.read_log_entries(0, i64::MAX as u64).await?;
-                assert_eq!(entry, self.log);
-            }
-        }
-        Ok(())
-    }
 
     fn is_last_log_term_index_ok(&self, last_index: u64, last_term: u64) -> bool {
         if self.log.len() == 0 {
@@ -656,6 +596,49 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
                 )
             );
     }
+
+    // vote_end
+    async fn restart_for_testing(
+        &mut self,
+    ) -> Res<()> {
+        event_add!(RAFT_FUZZY, Message::new(RaftEvent::Restart, self.node_id(), self.node_id())); //FUZZY
+        self.testing_is_crash = false;
+        self.state = RaftState::Follower;
+        self.tick = 0;
+        self.match_index.clear();
+        self.next_index.clear();
+        self.vote_granted.clear();
+
+        self.pre_vote_response.clear();
+        self.recovery().await?;
+        self.commit_index = self.snapshot.index;
+        Ok(())
+    }
+
+    async fn compact_log(&mut self, index: u64) -> Res<()> {
+        assert!(index > self.snapshot.index);
+        event_add!(RAFT_FUZZY, Message::new(RaftEvent::CompactLog, self.node_id(), self.node_id())); //FUZZY
+        let n = (index - self.snapshot.index) as usize;
+        assert!(n >= 1);
+        if cfg!(debug_assertions) {
+            let entry = self.store.read_log_entries(0, i64::MAX as u64).await?;
+            assert_eq!(entry, self.log);
+        }
+        let log_entries: Vec<_> = self.log.splice(0..=n - 1, vec![]).collect();
+        if !log_entries.is_empty() {
+            let entry: &LogEntry<T> = log_entries.last().unwrap();
+            self.snapshot.index = entry.index;
+            self.snapshot.term = entry.term;
+
+            self.store.compact_log(self.snapshot.clone(), log_entries).await?;
+            if cfg!(debug_assertions) {
+                let entry = self.store.read_log_entries(0, i64::MAX as u64).await?;
+                assert_eq!(entry, self.log);
+            }
+        }
+        Ok(())
+    }
+
 
     async fn append_entries(&self) -> Res<()> {
         for node_id in self.config.secondary() {
@@ -797,7 +780,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         let (to_append, offset_write) = if self.log.len() == offset_start {
             // *prev_index* is exactly equal to current log
             // append all log entries, start at offset *offset_start*
-            event_add!(RAFT_FUZZY, Message::new(RaftEvent::AppendLogAll, self.node_id(), self.node_id()));
+            event_add!(RAFT_FUZZY, Message::new(RaftEvent::AppendLogAll, self.node_id(), self.node_id())); //FUZZY
             (log_entries, offset_start as u64)
         } else {
             assert!(self.log.len() > offset_start);
@@ -826,7 +809,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
                     let mut to_append = log_entries;
                     // to_append, remove index range 0..i, and left index range i..
                     to_append = to_append.drain(i..).collect();
-                    event_add!(RAFT_FUZZY, Message::new(RaftEvent::AppendLogOverwrite, self.node_id(), self.node_id()));
+                    event_add!(RAFT_FUZZY, Message::new(RaftEvent::AppendLogOverwrite, self.node_id(), self.node_id())); //FUZZY
                     (to_append, (offset_start + i) as u64)
                 }
                 None => {
@@ -836,7 +819,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
                     let mut to_append = log_entries;
                     let pos = min(pos, to_append.len());
                     let to_append1 = to_append.drain(pos..).collect();
-                    event_add!(RAFT_FUZZY, Message::new(RaftEvent::AppendLogIgnoreEqual, self.node_id(), self.node_id()));
+                    event_add!(RAFT_FUZZY, Message::new(RaftEvent::AppendLogIgnoreEqual, self.node_id(), self.node_id())); //FUZZY
                     (to_append1, (offset_start + pos) as u64)
                 }
             }
@@ -899,12 +882,12 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
             // reject request
             let next_index = if self.snapshot.index > m.prev_log_index {
                 // a stale prev_log_index
-                event_add!(RAFT_FUZZY,
-                Message::new(
-                    RaftEvent::AppendLogStaleIndex,
-                    self.node_id(),
-                    self.node_id()));
-                self.snapshot.index
+                event_add!(RAFT_FUZZY,  //FUZZY
+                Message::new(  //FUZZY
+                    RaftEvent::AppendLogStaleIndex,  //FUZZY
+                    self.node_id(),  //FUZZY
+                    self.node_id()));  //FUZZY
+                self.snapshot.index  //FUZZY
             } else {
                 0
             };
@@ -1057,16 +1040,14 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         _to: NID,
         m: MApplyReq<T>,
     ) -> Res<()> {
-        let term = m.term;
+        let term = self.current_term;
         self.update_term(term).await?;
-        self.apply_snapshot_gut(m).await?;
+        self.apply_snapshot_gut(m, term).await?;
         Ok(())
     }
 
-    async fn apply_snapshot_gut(&mut self, m: MApplyReq<T>) -> Res<()> {
-
-        event_add!(RAFT_FUZZY, Message::new(RaftEvent::ApplySnapshot, self.node_id(), self.node_id()));
-
+    async fn apply_snapshot_gut(&mut self, m: MApplyReq<T>, term:u64) -> Res<()> {
+        event_add!(RAFT_FUZZY, Message::new(RaftEvent::ApplySnapshot, self.node_id(), self.node_id()));  //FUZZY
 
         if self.current_term != m.term {
             return Ok(());
@@ -1088,10 +1069,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
                 None,
                 opt_write_snap
             ).await?;
-            let iter = match opt_iter {
-                Some(v) => v,
-                None => vec![],
-            };
+            let iter = opt_iter.unwrap_or_else(|| vec![]);
             iter
         } else {
             vec![]
@@ -1102,7 +1080,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
             RaftMessage::ApplyResp(
                 MApplyResp {
                     source_nid: self.node_id(),
-                    term: self.current_term,
+                    term, //todo update by current_term
                     id: m.id,
                     iter,
                 }
@@ -1114,7 +1092,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         self.send(resp).await?;
         Ok(())
     }
-    #[allow(dead_code)]
+
     async fn handle_apply_snapshot_response(
         &mut self,
         _from: NID,
@@ -1128,26 +1106,16 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
     }
 
     async fn send(&self, m: Message<RaftMessage<T>>) -> Res<()> {
-        if self.testing_is_crash {
+        if self.testing_is_crash { //FUZZY
             // disable output
-            return Ok(())
-        }
+            return Ok(()) //FUZZY
+        } //FUZZY
         let _m = m.clone();
-        output!(RAFT, _m.clone());
-        if auto_enable!(RAFT_ABSTRACT)
-            || auto_enable!(RAFT)
-        {
-            return Ok(());
-        }
-        if fuzzy_enable!(RAFT_FUZZY) {
-            fuzzy_message!(RAFT_FUZZY, _m.clone());
-            return Ok(())
-        }
+        output!(RAFT, _m.clone()); //DTM
+        fuzzy_message!(RAFT_FUZZY, _m.clone()); //FUZZY
         let s = self.sender.send(m, Default::default()).await;
         match s {
-            Ok(_) => {
-
-            },
+            Ok(_) => {},
             Err(e) => {
                 info!("send message error, {}", e);
             }
@@ -1157,7 +1125,6 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
 
 
     async fn update_term(&mut self, term: u64) -> Res<()> {
-
         if self.current_term < term {
             self.current_term = term;
             self.become_follower().await?;
@@ -1193,269 +1160,234 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         Ok(())
     }
 
-    async fn handle_dtm_testing_message(&mut self, source: NID, dest: NID, m: MDTMTesting<T>) -> Res<()> {
-        let _a = Message::new(RaftMessage::DTMTesting(m.clone()), source, dest);
-        match m {
-            MDTMTesting::Setup(hs) => {
-                setup!(RAFT, _a.clone());
-                setup_begin!(RAFT_ABSTRACT, _a.clone());
-                self.state_setup(hs).await?;
-                setup_end!(RAFT_ABSTRACT, _a.clone());
+    async fn handle_dtm_testing_message(&mut self, source: NID, dest: NID, m: MDTMTesting<T>) -> Res<()> { //DTM
+        let _a = Message::new(RaftMessage::DTMTesting(m.clone()), source, dest); //DTM
+        match m { //DTM
+            MDTMTesting::Setup(hs) => { //DTM
+                let _hs = hs.clone(); //DTM
+                setup!(RAFT, _a.clone()); //DTM
+                setup_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.state_setup(hs).await?; //DTM
+                setup_end!(RAFT_ABSTRACT, _a.clone()); //DTM
+                let _fm = Message::new(RaftMessage::FuzzyTesting(MFuzzyTesting::Setup(_hs)), source, dest); //DTM
+                info!("fuzzy message {:?}", _fm); //DTM
+                fuzzy_init!(RAFT_FUZZY, _fm); //DTM
             }
-            MDTMTesting::Check(hs) => {
-                check!(RAFT, _a.clone());
-                check_begin!(RAFT_ABSTRACT, _a.clone());
-                self.state_check(hs).await?;
-                check_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::Check(hs) => { //DTM
+                check!(RAFT, _a.clone()); //DTM
+                check_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.state_check(hs).await?; //DTM
+                check_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::RequestVote => {
-                input!(RAFT, _a.clone());
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                self.start_request_vote().await?;
-                input_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::RequestVote => { //DTM
+                input!(RAFT, _a.clone()); //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.start_request_vote().await?; //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::BecomeLeader => {
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                self.become_leader().await?;
-                input_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::BecomeLeader => { //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.become_leader().await; //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::AppendLog => {
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                input_end!(RAFT_ABSTRACT, _a.clone());
-                input!(RAFT, _a.clone());
-                self.append_entries().await?;
+            MDTMTesting::AppendLog => { //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
+                input!(RAFT, _a.clone()); //DTM
+                self.append_entries().await?; //DTM
             }
-            MDTMTesting::ClientWriteLog(v) => {
-                input!(RAFT, _a.clone());
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                let _ = self.client_request_write_value_gut(v).await?;
-                input_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::ClientWriteLog(v) => { //DTM
+                input!(RAFT, _a.clone()); //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                let _ = self.client_request_write_value_gut(v).await?; //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::HandleVoteReq(m) => {
-                if auto_enable!(RAFT_ABSTRACT) {
-                    input_begin!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::HandleVoteReq(m) => { //DTM
+                if auto_enable!(RAFT_ABSTRACT) { //DTM
+                    input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
                     // invoke update_term
-                    self.handle_vote_req(m).await?;
-                    input_end!(RAFT_ABSTRACT, _a.clone());
-                } else if auto_enable!(RAFT) {
+                    self.handle_vote_req(m).await?; //DTM
+                    input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
+                } else if auto_enable!(RAFT) { //DTM
                     // do not invoke update_term
-                    self.handle_vote_req_gut(m).await?;
+                    self.handle_vote_req_gut(m).await?; //DTM
                 }
             }
-            MDTMTesting::HandleAppendReq(m) => {
-                if auto_enable!(RAFT_ABSTRACT) {
-                    input_begin!(RAFT_ABSTRACT, _a.clone());
-                    self.handle_append_req(m).await?;
-                    input_end!(RAFT_ABSTRACT, _a.clone());
-                } else if auto_enable!(RAFT) {
-                    self.handle_append_req_gut(m).await?;
+            MDTMTesting::HandleAppendReq(m) => { //DTM
+                if auto_enable!(RAFT_ABSTRACT) { //DTM
+                    input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                    self.handle_append_req(m).await?; //DTM
+                    input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
+                } else if auto_enable!(RAFT) { //DTM
+                    self.handle_append_req_gut(m).await?; //DTM
                 }
             }
-            MDTMTesting::UpdateTerm(term) => {
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                self.update_term(term).await?;
-                input_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::UpdateTerm(term) => { //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.update_term(term).await?; //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::HandleAppendResp(m) => {
-                self.handle_append_resp_gut(m).await?;
+            MDTMTesting::HandleAppendResp(m) => { //DTM
+                self.handle_append_resp_gut(m).await?; //DTM
             }
-            MDTMTesting::HandleVoteResp(m) => {
-                self.handle_vote_resp_gut(m).await?
+            MDTMTesting::HandleVoteResp(m) => { //DTM
+                self.handle_vote_resp_gut(m).await? //DTM
             }
-            MDTMTesting::Restart => {
-                input!(RAFT, _a.clone());
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                self.restart_for_testing().await?;
-                input_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::Restart => { //DTM
+                input!(RAFT, _a.clone()); //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.restart_for_testing().await?; //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::AdvanceCommitIndex(index) => {
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                self.set_commit_index(index).await?;
-                input_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::AdvanceCommitIndex(index) => { //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.set_commit_index(index).await?; //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::LogCompaction(index) => {
-                input!(RAFT, _a.clone());
-                input_begin!(RAFT_ABSTRACT, _a.clone());
-                self.compact_log(index).await?;
-                input_end!(RAFT_ABSTRACT, _a.clone());
+            MDTMTesting::LogCompaction(index) => { //DTM
+                input!(RAFT, _a.clone()); //DTM
+                input_begin!(RAFT_ABSTRACT, _a.clone()); //DTM
+                self.compact_log(index).await?; //DTM
+                input_end!(RAFT_ABSTRACT, _a.clone()); //DTM
             }
-            MDTMTesting::HandleApplyReq(m) => {
-                self.apply_snapshot_gut(m).await?;
-            }
-            MDTMTesting::HandleApplyResp(_m) => {}
+            MDTMTesting::HandleApplyReq(m) => { //DTM
+                self.apply_snapshot_gut(m, self.current_term).await?; //DTM
+            } //DTM
+            MDTMTesting::HandleApplyResp(_m) => {} //DTM
         }
-        Ok(())
+        Ok(()) //DTM
     }
 
-    async fn state_setup(&mut self, hs: MRaftState<T>) -> Res<()> {
-        self.current_term = hs.current_term;
-        self.voted_for = hs.voted_for;
-        self.log = hs.log.clone();
-        self.snapshot = hs.snapshot.to_snapshot_index_term();
-        self.state = hs.state;
-        match hs.log.first() {
-            Some(l) => {
-                assert_eq!(hs.snapshot.index + 1, l.index);
-            }
-            None => { }
-        };
-
-        self.match_index = hs.match_index.to_map();
-        self.next_index = hs.next_index.to_map();
-        self.commit_index = hs.commit_index;
-        self.vote_granted = hs.vote_granted.to_set();
-        self.store.setup_store_state(
-            Some(hs.commit_index),
-            Some((hs.current_term, hs.voted_for)),
-            Some(hs.log),
-            Some((hs.snapshot.to_snapshot_index_term(), hs.snapshot.to_value())),
-        ).await?;
-        Ok(())
-    }
-
-    async fn state_check(&self, hs: MRaftState<T>) -> Res<()> {
-        let (term, voted) = self.store.get_term_voted().await?;
-        assert_eq!(term, hs.current_term);
-        assert_eq!(voted, hs.voted_for);
-
-        let begin = self.store.get_min_log_index().await?;
-        let end = self.store.get_max_log_index().await? + 1;
-        let log = self.store.read_log_entries(begin, end).await?;
-        assert_eq!(log, hs.log);
-
-        let (s, values, _payload) = self.store.read_snapshot(
-            Uuid::new_v4().to_string(), None).await?;
-        assert_eq!(s, hs.snapshot.to_snapshot_index_term());
-        assert_eq!(values.len(), hs.snapshot.value.zzz_array.len());
-        if auto_enable!(RAFT) {
-            assert_eq!(self.commit_index, hs.commit_index);
+    async fn state_setup(&mut self, hs: MRaftState<T>) -> Res<()> { //DTM
+        self.current_term = hs.current_term; //DTM
+        self.voted_for = hs.voted_for; //DTM
+        self.log = hs.log.clone(); //DTM
+        self.snapshot = hs.snapshot.to_snapshot_index_term(); //DTM
+        self.state = hs.state; //DTM
+        match hs.log.first() {  //DTM
+            Some(l) => { //DTM
+                assert_eq!(hs.snapshot.index + 1, l.index); //DTM
+            } //DTM
+            None => { } //DTM
         }
-        Ok(())
-    }
-    async fn handle_client_response(&mut self, _source_id:NID, m:MClientResp) -> Res<()> {
-        if let Some((source_nid, sender)) = self.client_req.remove(&m.id) {
-            let msg = Message::new(
-                RaftMessage::<T>::ClientResp(m),
-                self.node_id(),
-                source_nid
-            );
-            let r = sender.send(msg).await;
-            match r {
-                Ok(_) => {
 
-                },
-                Err(e) => {
-                    error!("{}", e);
-                }
-            }
+        self.match_index = hs.match_index.to_map(); //DTM
+        self.next_index = hs.next_index.to_map(); //DTM
+        self.commit_index = hs.commit_index; //DTM
+        self.vote_granted = hs.vote_granted.to_set(); //DTM
+        self.store.setup_store_state( //DTM
+            Some(hs.commit_index), //DTM
+            Some((hs.current_term, hs.voted_for)), //DTM
+            Some(hs.log), //DTM
+            Some((hs.snapshot.to_snapshot_index_term(), hs.snapshot.to_value())), //DTM
+        ).await?; //DTM
+        Ok(()) //DTM
+    }
+
+    async fn state_check(&self, hs: MRaftState<T>) -> Res<()> { //DTM
+        let (term, voted) = self.store.get_term_voted().await?; //DTM
+        assert_eq!(term, hs.current_term); //DTM
+        assert_eq!(voted, hs.voted_for); //DTM
+
+        let begin = self.store.get_min_log_index().await?; //DTM
+        let end = self.store.get_max_log_index().await? + 1; //DTM
+        let log = self.store.read_log_entries(begin, end).await?; //DTM
+        assert_eq!(log, hs.log); //DTM
+
+        let (s, values, _payload) = self.store.read_snapshot( //DTM
+            Uuid::new_v4().to_string(), None).await?; //DTM
+        assert_eq!(s, hs.snapshot.to_snapshot_index_term()); //DTM
+        assert_eq!(values.len(), hs.snapshot.value.zzz_array.len()); //DTM
+        if auto_enable!(RAFT) { //DTM
+            assert_eq!(self.commit_index, hs.commit_index); //DTM
         }
-        Ok(())
+        Ok(()) //DTM
     }
 
-    async fn handle_client_value_req(
-        &mut self,
-        source_id:NID, m:MClientReq<T>,
-        sender:Arc<dyn SenderResp<RaftMessage<T>>>
-    ) -> Res<()> {
-        let need_resp = m.wait_commit || m.wait_write_local;
-        let id = m.id.clone();
-        let from_client_request= m.from_client_request;
-        let r = self.client_req_resp(source_id, m, sender.clone()).await;
-        if need_resp {
-            let resp = match r {
-                Ok(opt) => {
-                    match opt {
-                        Some(e) => { e }
-                        None => {
-                            MClientResp {
-                                id,
-                                source_id: self.node_id(),
-                                index: 0,
-                                term: 0,
-                                error: RCR_ERR_RESP,
-                                info: "".to_string(),
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    MClientResp {
-                        id,
-                        source_id: self.node_id(),
-                        index: 0,
-                        term: 0,
-                        error: RCR_ERR_RESP,
-                        info: e.to_string(),
-                    }
-                }
-            };
-            let msg = Message::new(
-                RaftMessage::ClientResp(resp),
-                self.node_id(),
-                source_id);
+    async fn handle_client_value_req( //NDTM
+        &mut self, //NDTM
+        source_id:NID, m:MClientReq<T>, //NDTM
+        sender:Arc<dyn SenderResp<RaftMessage<T>>> //NDTM
+    ) -> Res<()> { //NDTM
+        let need_resp = m.wait_commit || m.wait_write_local; //NDTM
+        let id = m.id.clone(); //NDTM
+        let from_client_request= m.from_client_request; //NDTM
+        let r = self.client_req_resp(source_id, m, sender.clone()).await; //NDTM
+        if need_resp { //NDTM
+            let resp = match r { //NDTM
+                Ok(opt) => { //NDTM
+                    match opt { //NDTM
+                        Some(e) => { e } //NDTM
+                        None => { //NDTM
+                            MClientResp { //NDTM
+                                id, //NDTM
+                                source_id: self.node_id(), //NDTM
+                                index: 0, //NDTM
+                                term: 0, //NDTM
+                                error: RCR_ERR_RESP, //NDTM
+                                info: "".to_string(), //NDTM
+                            } //NDTM
+                        } //NDTM
+                    } //NDTM
+                } //NDTM
+                Err(e) => { //NDTM
+                    MClientResp { //NDTM
+                        id, //NDTM
+                        source_id: self.node_id(), //NDTM
+                        index: 0, //NDTM
+                        term: 0, //NDTM
+                        error: RCR_ERR_RESP, //NDTM
+                        info: e.to_string(), //NDTM
+                    } //NDTM
+                } //NDTM
+            }; //NDTM
+            let msg  = Message::new( //NDTM
+                RaftMessage::ClientResp(resp), //NDTM
+                self.node_id(), //NDTM
+                source_id); //NDTM
 
-            if from_client_request {
-                let r = sender.send(msg).await;
-                match r {
-                    Ok(_) => {
-
+            if from_client_request { //NDTM
+                let r = sender.send(msg).await; //NDTM
+                match r { //NDTM
+                    Ok(_) => { //NDTM
                     },
-                    Err(e) => {
-                        error!("{}", e);
+                    Err(e) => { //NDTM
+                        error!("{}", e); //NDTM
                     }
                 }
-            } else {
-                self.send(msg).await?;
+            } else { //NDTM
+                self.send(msg).await?; //NDTM
             }
-            Ok(())
-        } else {
-            Ok(())
+            Ok(()) //NDTM
+        } else { //NDTM
+            Ok(()) //NDTM
         }
     }
 
-    /*
-    async fn client_request_send_to_leader(&mut self, m:MClientReq<T>) -> Res<()> {
-        if let Some(leader) = self.voted_for {
-            let wait_commit = m.wait_commit;
-            let wait_write_local = m.wait_write_local;
-            if wait_commit || wait_write_local {
-                let mut m = m;
-                m.from_client_request = false;
-                m.source_id = Some(self.node_id());
-                let msg = Message::new(
-                    RaftMessage::ClientReq(m),
-                    self.node_id(), leader);
-                self.send(msg).await?;
-            }
-        }
-        Ok(())
-    }
-     */
+    async fn client_req_resp( //NDTM
+        &mut self, //NDTM
+        _source_nid:NID, //NDTM
+        m:MClientReq<T>, //NDTM
+        _sender:Arc<dyn SenderResp<RaftMessage<T>>> //NDTM
+    ) -> Res<Option<MClientResp>> { //NDTM
+        if self.state != RaftState::Leader { //NDTM
+            return Ok(None) //NDTM
+        } //NDTM
 
-    async fn client_req_resp(
-        &mut self,
-        _source_nid:NID,
-        m:MClientReq<T>,
-        _sender:Arc<dyn SenderResp<RaftMessage<T>>>
-    ) -> Res<Option<MClientResp>> {
-        if self.state != RaftState::Leader {
-            return Ok(None)
-        }
-
-        let (index, term) = self.client_request_write_value_gut(m.value).await?;
-        if m.wait_write_local || m.wait_commit {
-            let _m = MClientResp {
-                id: m.id,
-                source_id: self.node_id(),
-                index,
-                term,
-                error: RCR_OK,
-                info: "".to_string(),
+        let (index, term) = self.client_request_write_value_gut(m.value).await?; //NDTM
+        if m.wait_write_local || m.wait_commit { //NDTM
+            let _m = MClientResp { //NDTM
+                id: m.id, //NDTM
+                source_id: self.node_id(), //NDTM
+                index, //NDTM
+                term, //NDTM
+                error: RCR_OK, //NDTM
+                info: "".to_string(), //NDTM
             };
-            return Ok(Some(_m));
-        }
+            return Ok(Some(_m)); //NDTM
+        } //NDTM
 
-        Ok(None)
+        Ok(None) //NDTM
     }
 
     async fn client_request_write_value_gut(&mut self, value:T) -> Res<(u64, u64)> {
@@ -1470,7 +1402,7 @@ impl<T: MsgTrait + 'static> StateMachineInner<T> {
         };
         self.write_log_entries(last_index, self.log.len() as u64, vec![entry]).await?;
         if self.config.conf().ms_tick > 0 {
-            self.append_entries().await?;
+            self.append_entries().await?; //NDTM
         }
         if self.config.voter().len() == 1 {
             self.advance_commit_index().await?;

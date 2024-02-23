@@ -1,0 +1,62 @@
+[
+  {
+    "source": 2,
+    "dest": 1,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 1,
+    "dest": 1,
+    "payload": "AppendLogCandidateToFollower"
+  },
+  {
+    "source": 2,
+    "dest": 1,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 1,
+    "dest": 1,
+    "payload": "AppendLogAll"
+  },
+  {
+    "source": 1,
+    "dest": 2,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 2,
+    "dest": 2,
+    "payload": "AppendLogCandidateToFollower"
+  },
+  {
+    "source": 1,
+    "dest": 2,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 2,
+    "dest": 2,
+    "payload": "AppendLogAll"
+  },
+  {
+    "source": 1,
+    "dest": 3,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 3,
+    "dest": 3,
+    "payload": "AppendLogCandidateToFollower"
+  },
+  {
+    "source": 1,
+    "dest": 3,
+    "payload": "AppendReq"
+  },
+  {
+    "source": 3,
+    "dest": 3,
+    "payload": "AppendLogAll"
+  }
+]

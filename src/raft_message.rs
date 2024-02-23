@@ -291,7 +291,8 @@ pub enum RaftMessage<T: MsgTrait + 'static> {
     ClientResp(MClientResp),
     #[serde(bound = "T: MsgTrait")]
     DTMTesting(MDTMTesting<T>),
-    FuzzyTesting(MFuzzyTesting),
+    #[serde(bound = "T: MsgTrait")]
+    FuzzyTesting(MFuzzyTesting<T>),
 }
 
 impl<T: MsgTrait + 'static> MsgTrait for RaftMessage<T> {}

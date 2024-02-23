@@ -2,24 +2,26 @@
 mod tests {
     use std::{io, thread};
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::sync::mpsc::Receiver;
     use std::thread::JoinHandle;
-    use std::sync::Arc;
+
     use scupt_fuzzy::{event_setup, event_unset};
     use scupt_util::message::Message;
     use scupt_util::res::Res;
     use sedeve_kit::action::panic::set_panic_hook;
+    use tracing::info;
 
     use crate::injection::tests::BugInject;
     use crate::raft_event::RaftEvent;
     use crate::raft_message::RAFT;
     use crate::raft_message::RAFT_FUZZY;
-    use crate::test_config::tests::TEST_CASE_MAX;
+    use crate::test_config::tests::{SECONDS_TEST_RUN_MAX, TEST_CASE_MAX};
+    use crate::test_dtm::tests::{InputType, StopSink, test_raft_gut};
     use crate::test_event_handler::tests::EventMessageHandler;
+    use crate::test_fuzzy_inner::tests;
     use crate::test_path::tests::test_data_path;
-    use crate::test_raft_dtm::tests::{InputType, StopSink, test_raft_gut};
-    use crate::test_raft_fuzzy::tests;
-    /*
+
     #[test]
     fn test_spec_driven_inject_event_1() {
         run_spec_driven_inject("injection_event_1.json".to_string()).unwrap();
@@ -32,48 +34,44 @@ mod tests {
 
     #[test]
     fn test_spec_driven_inject_event_3() {
-        run_spec_driven_inject("injection_event_3.json".to_string()).unwrap();
+       run_spec_driven_inject("injection_event_3.json".to_string()).unwrap();
     }
 
     #[test]
-    fn test_spec_driven_inject_event_4() {
-        run_spec_driven_inject("injection_event_4.json".to_string()).unwrap();
+    fn test_spec_driven_bug_injection_event_4() {
+        run_fuzzy_inject("injection_event_4.json".to_string());
     }
 
-
     #[test]
-    fn test_raft_fuzzy_bug_injection_event_1() {
+    fn test_fuzzy_bug_injection_event_1() {
         run_fuzzy_inject("injection_event_1.json".to_string());
     }
 
     #[test]
-    fn test_raft_fuzzy_bug_injection_event_2() {
+    fn test_fuzzy_bug_injection_event_2() {
         run_fuzzy_inject("injection_event_2.json".to_string());
     }
 
     #[test]
-    fn test_raft_fuzzy_bug_injection_event_3() {
+    fn test_fuzzy_bug_injection_event_3() {
         run_fuzzy_inject("injection_event_3.json".to_string());
     }
 
     #[test]
-    fn test_raft_fuzzy_bug_injection_event_4() {
+    fn test_fuzzy_bug_injection_event_4() {
         run_fuzzy_inject("injection_event_4.json".to_string());
     }
-    */
 
-    #[allow(dead_code)]
     fn run_fuzzy_inject(name:String) {
         set_panic_hook();
         let p = test_data_path(name).unwrap();
-        tests::run_raft_fuzzy(Some(p), 3, u64::MAX).unwrap();
+        tests::run_raft_fuzzy(Some(p), None, 3, SECONDS_TEST_RUN_MAX).unwrap();
     }
 
-    #[allow(dead_code)]
     fn run_spec_driven_inject(events_path: String) -> Res<()> {
         for i in 1..TEST_CASE_MAX {
             let stop_sink = StopSink::new();
-            let path = format!("raft_vote_replicate_trace_{}.db", i);
+            let path = format!("raft_spec_driven_{}.db", i);
             let buf = PathBuf::from(test_data_path(path.clone()).unwrap());
             if !buf.exists() {
                 break;
@@ -105,6 +103,7 @@ mod tests {
                 let detect_injected_bug = inject.input(m);
                 if detect_injected_bug {
                     stop_sink.stop();
+                    info!("inject bug found OK");
                     return true;
                 }
             } else {
